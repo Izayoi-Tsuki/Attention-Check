@@ -1,0 +1,102 @@
+# 个人注意力追踪原型
+
+storage:
+  db_path: data/attention.db
+  reports_dir: data/reports
+
+camera:
+  enabled: true         # 没有摄像头时可设为 false；为 true 但打不开时也会自动降级为只记录上下文
+  index: 0              # 摄像头编号，多个摄像头时可改为 1、2
+  width: 640
+  height: 480
+  target_fps: 15        # 处理帧率，越高越流畅、CPU 占用越高
+
+model:
+  path: models/face_landmarker.task
+  url: https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task
+
+gaze:
+  blink_threshold: 0.45 # eyeBlink 系数超过该值视为眨眼，此帧视线无效
+  buffer_seconds: 10    # 内存中保留的最近帧数据时长
+
+smoothing:              # One Euro 滤波器参数（单位：像素）
+  min_cutoff: 0.8       # 越小注视时越稳，但跟随越慢
+  beta: 0.003           # 越大快速扫视时延迟越小
+  d_cutoff: 1.0
+
+calibration:
+  margin: 0.08          # 校准点距屏幕边缘的比例
+  point_seconds: 1.6    # 每个点显示时长
+  settle_seconds: 0.6   # 每个点开始后丢弃的时长（眼睛跳转过去需要时间）
+  min_samples: 6        # 每个点至少需要的有效帧数，不足会重测
+  max_retries: 2
+  alphas: [0.1, 1, 10, 100]
+  validation_points: [[0.3, 0.3], [0.7, 0.3], [0.3, 0.7], [0.7, 0.7]]
+  background: "#7f7f7f"
+
+implicit:               # 点击隐式校准：点击前的视线 ≈ 点击位置
+  enabled: true
+  window: [0.30, 0.10]  # 取点击前 0.30s ~ 0.10s 之间的帧
+  accept_radius_px: 350 # 预测位置离点击点太远则视为没在看，丢弃
+  weight: 8             # 每个点击样本相当于多少个显式校准帧
+  refit_every: 3        # 每接受 N 个点击样本重新拟合一次
+  max_samples: 300
+
+posture:                # 与校准时相比，坐姿变化超过阈值则提示重新校准
+  max_distance_change: 0.12  # 与屏幕距离变化比例
+  max_shift_cm: 4.0
+  max_yaw_deg: 10.0
+
+overlay:
+  dot_radius: 14
+  window_probe_ms: 200  # 查询视线所在窗口的间隔
+
+context:
+  sample_seconds: 1.0   # 前台窗口与键鼠活跃度采样间隔
+
+privacy:
+  titles: keep          # keep 保留窗口标题 / hash 只存哈希 / drop 不存（hash/drop 会削弱按网站分类的能力）
+
+# 应用分类：从上到下依次匹配，先命中先得；exe 不区分大小写，title 为标题关键词。
+# 类别：task 工作 / comms 通讯 / distraction 干扰 / neutral 中性（未命中时的默认值）
+# 这是初始示例，请按自己的习惯修改。
+categories:
+  - category: distraction
+    title: [bilibili, 哔哩哔哩, 抖音, 微博, 知乎, 小红书, 淘宝, 京东, YouTube, Twitter, Reddit, 虎扑, 豆瓣]
+  - category: distraction
+    exe: [steam.exe, cloudmusic.exe, QQMusic.exe, PotPlayerMini64.exe]
+  - category: comms
+    exe: [iDingTalk.exe, DingTalk.exe, WeChat.exe, Weixin.exe, QQ.exe, Feishu.exe, Lark.exe, OUTLOOK.EXE]
+  - category: task
+    exe: [Code.exe, Qoder.exe, Cursor.exe, pycharm64.exe, devenv.exe, WindowsTerminal.exe, powershell.exe,
+          blender.exe, Photoshop.exe, Figma.exe, WINWORD.EXE, EXCEL.EXE, POWERPNT.EXE, UnrealEditor.exe]
+
+probes:
+  min_minutes: 8        # 随机询问间隔下限
+  max_minutes: 20       # 随机询问间隔上限
+  typing_defer_s: 15    # 正在打字时最多推迟多久
+  timeout_s: 30         # 无人回应自动关闭
+  self_hotkey: "<ctrl>+<alt>+m"   # 自己发现走神时按下
+
+# 第 3 步：特征窗口与规则状态机
+analysis:
+  window_s: 30
+  step_s: 5
+  fixation_dispersion_px: 180   # 摄像头噪声大，阈值放宽
+  fixation_min_s: 0.3
+  blink_closed: 0.7             # PERCLOS：眨眼系数高于此值视为闭眼
+
+rules:
+  away_no_face_ratio: 0.2       # 窗口内检测到人脸的帧占比低于此值 → 离开
+  away_idle_s: 300              # 无摄像头时：键鼠空闲超过此值 → 离开
+  drowsy_perclos: 0.25
+  drowsy_blink_s: 0.4
+  off_task_ratio: 0.66          # 30s 窗口中偏离任务 ≥ 20s
+  look_away_ratio: 0.6
+  zoned_input_gap_s: 20
+  zoned_max_fixation_s: 8
+  zoned_dispersion_px: 120
+  inactive_gap_s: 60            # 无摄像头时：无操作超过此值但未离开 → 无法判断
+  focus_in_window_ratio: 0.5
+  debounce_windows: 2           # 新状态连续出现 N 个窗口才切换
+  return_cap_min: 30            # 分心后超过此时长未回到专注，不计入回归耗时

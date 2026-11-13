@@ -1,0 +1,8 @@
+mediapipe==1.1.1
+numpy
+matplotlib
+pillow
+scikit-learn
+pywin32
+pynput
+pyyaml
